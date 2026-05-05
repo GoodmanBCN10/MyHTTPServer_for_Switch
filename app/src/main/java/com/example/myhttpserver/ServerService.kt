@@ -1,0 +1,104 @@
+package com.example.myhttpserver
+
+import android.app.*
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import androidx.core.app.NotificationCompat
+
+class ServerService : Service() {
+    private var switchServer: SwitchServer? = null
+    private val CHANNEL_ID = "SwitchServerChannel"
+    private val NOTIFICATION_ID = 1
+    
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        switchServer = SwitchServer(this)
+        createNotificationChannel()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val action = intent?.action
+        val uriString = intent?.getStringExtra("directoryUri")
+
+        if (action == "START" && uriString != null) {
+            acquireLocks()
+            val uri = Uri.parse(uriString)
+            switchServer?.start(uri)
+            startForeground(NOTIFICATION_ID, createNotification())
+        } else if (action == "STOP") {
+            switchServer?.stop()
+            releaseLocks()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+
+        return START_NOT_STICKY
+    }
+
+    private fun acquireLocks() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SwitchServer::WakeLock").apply {
+            acquire()
+        }
+
+        val wifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SwitchServer::WifiLock").apply {
+            acquire()
+        }
+    }
+
+    private fun releaseLocks() {
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+
+        wifiLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wifiLock = null
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun createNotification(): Notification {
+        val notificationIntent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, notificationIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Switch HTTP Server")
+            .setContentText("El servidor está activo y enviando archivos.")
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                CHANNEL_ID,
+                "Switch Server Service Channel",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(serviceChannel)
+        }
+    }
+
+    override fun onDestroy() {
+        switchServer?.stop()
+        super.onDestroy()
+    }
+}
