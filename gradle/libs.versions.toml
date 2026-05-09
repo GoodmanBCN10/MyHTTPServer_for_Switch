@@ -10,6 +10,7 @@ kotlin = "2.2.10"
 composeBom = "2026.02.01"
 ktor = "3.1.1"
 documentfile = "1.0.1"
+jlibtorrent = "1.2.19.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -30,6 +31,8 @@ ktor-server-core = { group = "io.ktor", name = "ktor-server-core-jvm", version.r
 ktor-server-netty = { group = "io.ktor", name = "ktor-server-netty-jvm", version.ref = "ktor" }
 ktor-server-status-pages = { group = "io.ktor", name = "ktor-server-status-pages-jvm", version.ref = "ktor" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
+jlibtorrent = { group = "org.frostwire", name = "jlibtorrent", version.ref = "jlibtorrent" }
+jlibtorrent-extension = { group = "org.frostwire", name = "jlibtorrent-extension", version.ref = "jlibtorrent" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
