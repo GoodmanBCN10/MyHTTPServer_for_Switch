@@ -6,7 +6,9 @@ import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import java.io.File
@@ -19,6 +21,14 @@ class ServerService : Service() {
     
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    
+    private val handler = Handler(Looper.getMainLooper())
+    private val progressRunnable = object : Runnable {
+        override fun run() {
+            updateProgress()
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -51,7 +61,8 @@ class ServerService : Service() {
                         torrentManager = TorrentManager(downloadDir)
                     }
                     torrentManager?.downloadMagnet(magnetUri)
-                    startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Bajando juego..."))
+                    handler.post(progressRunnable)
+                    startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Iniciando descarga..."))
                 }
             }
         }
@@ -59,7 +70,26 @@ class ServerService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun updateProgress() {
+        val stats = torrentManager?.getStats()
+        if (stats != null) {
+            // Enviar broadcast a la Activity
+            val intent = Intent("TORRENT_PROGRESS")
+            intent.putExtra("progress", stats.progress)
+            intent.putExtra("speed", stats.downloadSpeed)
+            intent.putExtra("name", stats.name)
+            sendBroadcast(intent)
+
+            // Actualizar notificación
+            val speedKb = stats.downloadSpeed / 1024
+            val content = "${stats.name} - ${stats.progress.toInt()}% (${speedKb} KB/s)"
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, createNotification("Descargando Juego", content))
+        }
+    }
+
     private fun stopAll() {
+        handler.removeCallbacks(progressRunnable)
         switchServer?.stop()
         torrentManager?.stop()
         releaseLocks()
