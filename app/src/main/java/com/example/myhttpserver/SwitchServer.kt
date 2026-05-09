@@ -3,6 +3,7 @@ package com.example.myhttpserver
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.core.net.toFile
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
@@ -12,6 +13,8 @@ import io.ktor.server.routing.*
 import io.ktor.server.request.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.InputStream
 
 class SwitchServer(private val context: Context) {
     private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
@@ -21,11 +24,17 @@ class SwitchServer(private val context: Context) {
         stop()
         server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
             routing {
-                // Listado de archivos con caché para velocidad instantánea
                 get("/") {
-                    cachedFiles = getFilesFromUri(directoryUri)
+                    // Combinar archivos de la carpeta seleccionada y la carpeta de descargas
+                    val safFiles = getFilesFromUri(directoryUri)
+                    val torrentDir = context.getExternalFilesDir("downloads")
+                    val torrentFiles = if (torrentDir != null) getFilesFromLocalDir(torrentDir) else emptyList()
+                    
+                    cachedFiles = safFiles + torrentFiles
+                    
                     val html = buildString {
                         append("<!DOCTYPE html><html><body>\n")
+                        append("<h2>Archivos disponibles</h2>")
                         cachedFiles.forEach { (name, _, _) ->
                             append("<a href=\"${Uri.encode(name)}\">$name</a><br>\n")
                         }
@@ -34,19 +43,15 @@ class SwitchServer(private val context: Context) {
                     call.respondText(html, ContentType.Text.Html)
                 }
 
-                // Manejo de archivos (GET y HEAD)
                 route("/{filename...}") {
                     handle {
                         val filename = call.parameters.getAll("filename")?.joinToString("/")?.let { Uri.decode(it) } 
                             ?: return@handle call.respond(HttpStatusCode.BadRequest)
                         
-                        // Usar caché para evitar re-escanear la microSD en cada petición (HEAD, GET, Range)
-                        val files = if (cachedFiles.isNotEmpty()) cachedFiles else getFilesFromUri(directoryUri)
-                        val fileTriple = files.find { it.first == filename } ?: return@handle call.respond(HttpStatusCode.NotFound)
+                        val fileTriple = cachedFiles.find { it.first == filename } ?: return@handle call.respond(HttpStatusCode.NotFound)
                         val fileUri = fileTriple.second
                         val size = fileTriple.third
                         
-                        // HEAD es vital para que DBI vea el tamaño y no diga "Nada que instalar"
                         if (call.request.local.method == HttpMethod.Head) {
                             call.response.header(HttpHeaders.ContentLength, size.toString())
                             call.response.header(HttpHeaders.AcceptRanges, "bytes")
@@ -54,7 +59,6 @@ class SwitchServer(private val context: Context) {
                             return@handle
                         }
 
-                        // Soporte de Range (Crítico para NSZ)
                         val rangeHeader = call.request.header(HttpHeaders.Range)
                         if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                             try {
@@ -70,7 +74,7 @@ class SwitchServer(private val context: Context) {
                                 call.respondOutputStream(ContentType.Application.OctetStream, HttpStatusCode.PartialContent) {
                                     val out = this
                                     withContext(Dispatchers.IO) {
-                                        context.contentResolver.openInputStream(fileUri)?.use { input ->
+                                        openInputStream(fileUri)?.use { input ->
                                             input.skip(start)
                                             val buffer = ByteArray(256 * 1024)
                                             var remaining = contentLength
@@ -88,14 +92,13 @@ class SwitchServer(private val context: Context) {
                             } catch (e: Exception) {}
                         }
 
-                        // Respuesta completa (Instalación NSP rápida)
                         call.response.header(HttpHeaders.ContentLength, size.toString())
                         call.response.header(HttpHeaders.AcceptRanges, "bytes")
                         
                         call.respondOutputStream(ContentType.Application.OctetStream, HttpStatusCode.OK) {
                             val out = this
                             withContext(Dispatchers.IO) {
-                                context.contentResolver.openInputStream(fileUri)?.use { input ->
+                                openInputStream(fileUri)?.use { input ->
                                     val buffer = ByteArray(256 * 1024)
                                     var read: Int
                                     while (input.read(buffer).also { read = it } != -1) {
@@ -109,6 +112,14 @@ class SwitchServer(private val context: Context) {
             }
         }
         server?.start(wait = false)
+    }
+
+    private fun openInputStream(uri: Uri): InputStream? {
+        return if (uri.scheme == "content") {
+            context.contentResolver.openInputStream(uri)
+        } else {
+            File(uri.path!!).inputStream()
+        }
     }
 
     fun stop() {
@@ -141,6 +152,16 @@ class SwitchServer(private val context: Context) {
                 }
             }
         } catch (e: Exception) {}
+        return files
+    }
+
+    private fun getFilesFromLocalDir(directory: File): List<Triple<String, Uri, Long>> {
+        val files = mutableListOf<Triple<String, Uri, Long>>()
+        directory.walkTopDown().forEach { file ->
+            if (file.isFile && (file.name.endsWith(".nsp", true) || file.name.endsWith(".nsz", true) || file.name.endsWith(".xci", true))) {
+                files.add(Triple(file.name, Uri.fromFile(file), file.length()))
+            }
+        }
         return files
     }
 }

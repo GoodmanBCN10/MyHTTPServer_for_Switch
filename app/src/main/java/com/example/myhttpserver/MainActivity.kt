@@ -41,7 +41,8 @@ class MainActivity : ComponentActivity() {
             MyHTTPServerTheme {
                 ServerScreen(
                     onStartServer = { uri -> startService(uri) },
-                    onStopServer = { stopService() }
+                    onStopServer = { stopService() },
+                    onStartTorrent = { magnet -> startTorrentDownload(magnet) }
                 )
             }
         }
@@ -59,6 +60,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startTorrentDownload(magnet: String) {
+        val intent = Intent(this, ServerService::class.java).apply {
+            action = "START_TORRENT"
+            putExtra("magnetUri", magnet)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     private fun stopService() {
         val intent = Intent(this, ServerService::class.java).apply {
             action = "STOP"
@@ -68,13 +81,17 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ServerScreen(onStartServer: (Uri) -> Unit, onStopServer: () -> Unit) {
+fun ServerScreen(
+    onStartServer: (Uri) -> Unit, 
+    onStopServer: () -> Unit,
+    onStartTorrent: (String) -> Unit
+) {
     val context = LocalContext.current
     var selectedUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var isRunning by rememberSaveable { mutableStateOf(false) }
     var ipAddress by remember { mutableStateOf("No conectado") }
+    var magnetUri by remember { mutableStateOf("") }
 
-    // Pedir permiso de notificaciones en Android 13+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {}
@@ -134,7 +151,7 @@ fun ServerScreen(onStartServer: (Uri) -> Unit, onStopServer: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Switch HTTP Server",
+                text = "Switch HTTP Server + Torrent",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
@@ -155,7 +172,7 @@ fun ServerScreen(onStartServer: (Uri) -> Unit, onStopServer: () -> Unit) {
                 onClick = { launcher.launch(null) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
             ) {
-                Text(text = if (selectedUri == null) "Seleccionar Carpeta" else "Carpeta Lista")
+                Text(text = if (selectedUri == null) "1. Seleccionar Carpeta SD" else "Carpeta Lista")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -177,7 +194,49 @@ fun ServerScreen(onStartServer: (Uri) -> Unit, onStopServer: () -> Unit) {
                     containerColor = if (isRunning) Color.Red else Color(0xFF4CAF50)
                 )
             ) {
-                Text(text = if (isRunning) "Detener Servidor" else "Iniciar Servidor")
+                Text(text = if (isRunning) "2. Iniciar Servidor" else "2. Iniciar Servidor")
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            HorizontalDivider(color = Color.Gray, thickness = 0.5.dp)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Gestor Torrent",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = magnetUri,
+                onValueChange = { magnetUri = it },
+                label = { Text("Pegar enlace Magnet", color = Color.Gray) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Color.Cyan,
+                    unfocusedBorderColor = Color.Gray
+                )
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    onStartTorrent(magnetUri)
+                    magnetUri = ""
+                },
+                enabled = magnetUri.startsWith("magnet:"),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+            ) {
+                Text("Descargar Juego")
             }
         }
     }
