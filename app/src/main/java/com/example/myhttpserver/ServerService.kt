@@ -9,9 +9,11 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import java.io.File
 
 class ServerService : Service() {
     private var switchServer: SwitchServer? = null
+    private var torrentManager: TorrentManager? = null
     private val CHANNEL_ID = "SwitchServerChannel"
     private val NOTIFICATION_ID = 1
     
@@ -26,50 +28,71 @@ class ServerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        val uriString = intent?.getStringExtra("directoryUri")
-
-        if (action == "START" && uriString != null) {
-            acquireLocks()
-            val uri = Uri.parse(uriString)
-            switchServer?.start(uri)
-            startForeground(NOTIFICATION_ID, createNotification())
-        } else if (action == "STOP") {
-            switchServer?.stop()
-            releaseLocks()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        
+        when (action) {
+            "START" -> {
+                val uriString = intent.getStringExtra("directoryUri")
+                if (uriString != null) {
+                    acquireLocks()
+                    val uri = Uri.parse(uriString)
+                    switchServer?.start(uri)
+                    startForeground(NOTIFICATION_ID, createNotification("Servidor Activo", "Sirviendo archivos a la Switch"))
+                }
+            }
+            "STOP" -> {
+                stopAll()
+            }
+            "START_TORRENT" -> {
+                val magnetUri = intent.getStringExtra("magnetUri")
+                if (magnetUri != null) {
+                    acquireLocks()
+                    if (torrentManager == null) {
+                        val downloadDir = getExternalFilesDir("downloads") ?: filesDir
+                        torrentManager = TorrentManager(downloadDir)
+                    }
+                    torrentManager?.downloadMagnet(magnetUri)
+                    startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Bajando juego..."))
+                }
+            }
         }
 
         return START_NOT_STICKY
     }
 
+    private fun stopAll() {
+        switchServer?.stop()
+        torrentManager?.stop()
+        releaseLocks()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     private fun acquireLocks() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SwitchServer::WakeLock").apply {
-            acquire()
+        if (wakeLock == null) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SwitchServer::WakeLock").apply {
+                acquire()
+            }
         }
 
-        val wifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
-        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SwitchServer::WifiLock").apply {
-            acquire()
+        if (wifiLock == null) {
+            val wifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SwitchServer::WifiLock").apply {
+                acquire()
+            }
         }
     }
 
     private fun releaseLocks() {
-        wakeLock?.let {
-            if (it.isHeld) it.release()
-        }
+        wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
-
-        wifiLock?.let {
-            if (it.isHeld) it.release()
-        }
+        wifiLock?.let { if (it.isHeld) it.release() }
         wifiLock = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun createNotification(): Notification {
+    private fun createNotification(title: String, content: String): Notification {
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent,
@@ -77,8 +100,8 @@ class ServerService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Switch HTTP Server")
-            .setContentText("El servidor está activo y enviando archivos.")
+            .setContentTitle(title)
+            .setContentText(content)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -98,7 +121,7 @@ class ServerService : Service() {
     }
 
     override fun onDestroy() {
-        switchServer?.stop()
+        stopAll()
         super.onDestroy()
     }
 }
