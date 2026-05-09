@@ -59,6 +59,8 @@ dependencies {
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.status.pages)
     implementation(libs.androidx.documentfile)
+    implementation(libs.jlibtorrent)
+    implementation(libs.jlibtorrent.extension)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
