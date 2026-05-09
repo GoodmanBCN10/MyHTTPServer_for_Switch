@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
                     isDownloading = isDownloading,
                     progress = torrentProgress,
                     speed = torrentSpeed,
-                    downloadName = torrentName
+                    downloadName = if (torrentName.isEmpty() && isDownloading) "Buscando información..." else torrentName
                 )
             }
         }

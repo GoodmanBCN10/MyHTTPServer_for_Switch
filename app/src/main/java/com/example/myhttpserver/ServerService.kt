@@ -89,6 +89,9 @@ class ServerService : Service() {
                             torrentManager?.downloadTorrent(torrentInfo)
                             handler.post(progressRunnable)
                             startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Cargando $name..."))
+                            
+                            // Re-escaneo de archivos para que el servidor lo vea de inmediato
+                            switchServer?.refresh()
                         }
                     } catch (e: Exception) {
                         Log.e("ServerService", "Error cargando archivo torrent", e)

@@ -132,6 +132,10 @@ class SwitchServer(private val context: Context) {
         }
     }
 
+    fun refresh() {
+        cachedFiles = emptyList() // Forzar re-escaneo en la próxima petición
+    }
+
     private fun getFilesFromUri(directoryUri: Uri): List<Triple<String, Uri, Long>> {
         val files = mutableListOf<Triple<String, Uri, Long>>()
         try {
