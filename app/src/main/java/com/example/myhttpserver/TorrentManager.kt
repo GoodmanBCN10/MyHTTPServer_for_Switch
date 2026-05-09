@@ -2,6 +2,8 @@ package com.example.myhttpserver
 
 import android.util.Log
 import com.frostwire.jlibtorrent.*
+import com.frostwire.jlibtorrent.swig.settings_pack
+import com.frostwire.jlibtorrent.swig.alert_category_t
 import com.frostwire.jlibtorrent.alerts.Alert
 import com.frostwire.jlibtorrent.alerts.AlertType
 import com.frostwire.jlibtorrent.alerts.TorrentFinishedAlert
@@ -20,8 +22,11 @@ class TorrentManager(private val downloadDir: File) {
     private var listener: TorrentListener? = null
 
     init {
-        // Iniciar la sesión de libtorrent
-        session.start()
+        // Iniciar la sesión de libtorrent con configuraciones optimizadas
+        val settings = SettingsPack()
+        settings.enableDht(true)
+        
+        session.start(SessionParams(settings))
         
         // Listener para capturar eventos (alertas) de la sesión
         session.addListener(object : AlertListener {

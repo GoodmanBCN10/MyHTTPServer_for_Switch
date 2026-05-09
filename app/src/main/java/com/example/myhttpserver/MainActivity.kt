@@ -44,10 +44,17 @@ class MainActivity : ComponentActivity() {
 
     private val torrentReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            android.util.Log.d("MainActivity", "Broadcast recibido: ${intent?.action}")
             if (intent?.action == "TORRENT_PROGRESS") {
-                torrentProgress = intent.getFloatExtra("progress", 0f)
-                torrentSpeed = intent.getLongExtra("speed", 0L)
-                torrentName = intent.getStringExtra("name") ?: ""
+                val progress = intent.getFloatExtra("progress", 0f)
+                val speed = intent.getLongExtra("speed", 0L)
+                val name = intent.getStringExtra("name") ?: ""
+                
+                android.util.Log.d("MainActivity", "Progreso: $progress%, Speed: $speed, Name: $name")
+                
+                torrentProgress = progress
+                torrentSpeed = speed
+                torrentName = name
                 isDownloading = true
             }
         }
@@ -108,6 +115,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startTorrentFileDownload(uri: Uri) {
+        android.util.Log.d("MainActivity", "Iniciando descarga de archivo: $uri")
         isDownloading = true
         val intent = Intent(this, ServerService::class.java).apply {
             action = "START_TORRENT_FILE"
@@ -261,7 +269,7 @@ fun ServerScreen(
                     containerColor = if (isRunning) Color.Red else Color(0xFF4CAF50)
                 )
             ) {
-                Text(text = if (isRunning) "2. Iniciar Servidor" else "2. Iniciar Servidor")
+                Text(text = if (isRunning) "2. Detener Servidor" else "2. Iniciar Servidor")
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -303,6 +311,16 @@ fun ServerScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            OutlinedButton(
+                onClick = { torrentFileLauncher.launch("*/*") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Cyan)
+            ) {
+                Text("Seleccionar archivo .torrent")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             OutlinedTextField(
                 value = magnetUri,
                 onValueChange = { magnetUri = it },
@@ -328,16 +346,6 @@ fun ServerScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
             ) {
                 Text("Descargar vía Magnet")
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = { torrentFileLauncher.launch("application/x-bittorrent") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Cyan)
-            ) {
-                Text("Seleccionar archivo .torrent")
             }
         }
     }
