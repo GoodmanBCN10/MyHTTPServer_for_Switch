@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import com.frostwire.jlibtorrent.TorrentInfo
 import java.io.File
 
 class ServerService : Service() {
@@ -57,18 +58,41 @@ class ServerService : Service() {
                 val magnetUri = intent.getStringExtra("magnetUri")
                 if (magnetUri != null) {
                     acquireLocks()
-                    if (torrentManager == null) {
-                        val downloadDir = getExternalFilesDir("downloads") ?: filesDir
-                        torrentManager = TorrentManager(downloadDir)
-                    }
+                    ensureTorrentManager()
                     torrentManager?.downloadMagnet(magnetUri)
                     handler.post(progressRunnable)
                     startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Iniciando descarga..."))
                 }
             }
+            "START_TORRENT_FILE" -> {
+                val uriString = intent.getStringExtra("torrentUri")
+                if (uriString != null) {
+                    acquireLocks()
+                    ensureTorrentManager()
+                    try {
+                        val uri = Uri.parse(uriString)
+                        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        if (bytes != null) {
+                            val torrentInfo = TorrentInfo(bytes)
+                            torrentManager?.downloadTorrent(torrentInfo)
+                            handler.post(progressRunnable)
+                            startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Cargando archivo..."))
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ServerService", "Error cargando archivo torrent", e)
+                    }
+                }
+            }
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun ensureTorrentManager() {
+        if (torrentManager == null) {
+            val downloadDir = getExternalFilesDir("downloads") ?: filesDir
+            torrentManager = TorrentManager(downloadDir)
+        }
     }
 
     private fun updateProgress() {

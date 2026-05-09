@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
                     onStartServer = { uri -> startService(uri) },
                     onStopServer = { stopService() },
                     onStartTorrent = { magnet -> startTorrentDownload(magnet) },
+                    onSelectTorrentFile = { uri -> startTorrentFileDownload(uri) },
                     isDownloading = isDownloading,
                     progress = torrentProgress,
                     speed = torrentSpeed,
@@ -106,6 +107,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startTorrentFileDownload(uri: Uri) {
+        isDownloading = true
+        val intent = Intent(this, ServerService::class.java).apply {
+            action = "START_TORRENT_FILE"
+            putExtra("torrentUri", uri.toString())
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     private fun stopService() {
         isDownloading = false
         val intent = Intent(this, ServerService::class.java).apply {
@@ -125,6 +139,7 @@ fun ServerScreen(
     onStartServer: (Uri) -> Unit, 
     onStopServer: () -> Unit,
     onStartTorrent: (String) -> Unit,
+    onSelectTorrentFile: (Uri) -> Unit,
     isDownloading: Boolean,
     progress: Float,
     speed: Long,
@@ -161,6 +176,14 @@ fun ServerScreen(
                 e.printStackTrace()
             }
             selectedUri = uri
+        }
+    }
+
+    val torrentFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            onSelectTorrentFile(uri)
         }
     }
 
@@ -304,7 +327,17 @@ fun ServerScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
             ) {
-                Text("Descargar Juego")
+                Text("Descargar vía Magnet")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { torrentFileLauncher.launch("application/x-bittorrent") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Cyan)
+            ) {
+                Text("Seleccionar archivo .torrent")
             }
         }
     }
