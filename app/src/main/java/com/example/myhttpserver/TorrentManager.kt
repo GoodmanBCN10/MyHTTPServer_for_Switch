@@ -2,8 +2,6 @@ package com.example.myhttpserver
 
 import android.util.Log
 import com.frostwire.jlibtorrent.*
-import com.frostwire.jlibtorrent.swig.settings_pack
-import com.frostwire.jlibtorrent.swig.alert_category_t
 import com.frostwire.jlibtorrent.alerts.Alert
 import com.frostwire.jlibtorrent.alerts.AlertType
 import com.frostwire.jlibtorrent.alerts.TorrentFinishedAlert
@@ -22,33 +20,33 @@ class TorrentManager(private val downloadDir: File) {
     private var listener: TorrentListener? = null
 
     init {
-        // Iniciar la sesión de libtorrent con configuraciones optimizadas
         val settings = SettingsPack()
+        
+        // Identidad confiable
+        settings.setString(com.frostwire.jlibtorrent.swig.settings_pack.string_types.user_agent.swigValue(), "qBittorrent/4.5.2")
+        
+        // Red y Puertos
+        settings.listenInterfaces("0.0.0.0:6881")
         settings.enableDht(true)
         
         session.start(SessionParams(settings))
         
-        // Listener para capturar eventos (alertas) de la sesión
         session.addListener(object : AlertListener {
-            override fun types(): IntArray? = null // Escuchar todas las alertas
+            override fun types(): IntArray? = null
 
             override fun alert(alert: Alert<*>) {
-                when (alert.type()) {
+                val type = alert.type()
+                
+                when (type) {
                     AlertType.TORRENT_FINISHED -> {
-                        val torrentAlert = alert as TorrentFinishedAlert
-                        Log.d(TAG, "Descarga finalizada: ${torrentAlert.torrentName()}")
+                        Log.d(TAG, "Descarga finalizada")
                         listener?.onFinished(downloadDir)
                     }
                     AlertType.TORRENT_ERROR -> {
-                        Log.e(TAG, "Error en el torrent: ${alert.toString()}")
-                        listener?.onError(alert.toString())
+                        Log.e(TAG, "Error en torrent: ${alert.swig().message()}")
+                        listener?.onError(alert.swig().message())
                     }
-                    AlertType.TRACKER_ERROR -> {
-                        Log.w(TAG, "Error de tracker: ${alert.toString()}")
-                    }
-                    else -> {
-                        // Podemos monitorear el progreso aquí o con un timer
-                    }
+                    else -> {}
                 }
             }
         })
@@ -58,42 +56,26 @@ class TorrentManager(private val downloadDir: File) {
         this.listener = listener
     }
 
-    /**
-     * Inicia la descarga desde un archivo .torrent (TorrentInfo)
-     */
     fun downloadTorrent(torrentInfo: TorrentInfo) {
-        if (!downloadDir.exists()) {
-            downloadDir.mkdirs()
-        }
+        if (!downloadDir.exists()) downloadDir.mkdirs()
         try {
-            Log.d(TAG, "Iniciando descarga de archivo torrent: ${torrentInfo.name()}")
+            Log.d(TAG, "Iniciando torrent: ${torrentInfo.name()}")
             session.download(torrentInfo, downloadDir)
+            session.swig().post_torrent_updates()
         } catch (e: Exception) {
-            Log.e(TAG, "Error al iniciar descarga de torrent", e)
-            listener?.onError(e.message ?: "Error desconocido")
+            Log.e(TAG, "Error al iniciar", e)
         }
     }
 
-    /**
-     * Inicia la descarga de un enlace Magnet
-     */
     fun downloadMagnet(magnetUri: String) {
-        if (!downloadDir.exists()) {
-            downloadDir.mkdirs()
-        }
-        
+        if (!downloadDir.exists()) downloadDir.mkdirs()
         try {
-            Log.d(TAG, "Iniciando descarga de magnet: $magnetUri")
             session.download(magnetUri, downloadDir)
         } catch (e: Exception) {
-            Log.e(TAG, "Error al iniciar descarga de magnet", e)
-            listener?.onError(e.message ?: "Error desconocido")
+            Log.e(TAG, "Error al iniciar magnet", e)
         }
     }
 
-    /**
-     * Obtiene estadísticas actuales del primer torrent activo
-     */
     fun getStats(): TorrentStats? {
         val torrents = session.swig().get_torrents()
         if (torrents == null || torrents.empty()) return null
@@ -101,10 +83,17 @@ class TorrentManager(private val downloadDir: File) {
         val handle = TorrentHandle(torrents.get(0))
         val status = handle.status()
         
+        // Solo forzar re-anuncio si realmente estamos buscando
+        if (status.numPeers() == 0 && status.progress() < 1.0) {
+            handle.forceReannounce()
+        }
+        
         return TorrentStats(
             progress = status.progress() * 100,
             downloadSpeed = status.downloadPayloadRate().toLong(),
-            name = status.name()
+            name = if (status.name().isEmpty()) "Cargando..." else status.name(),
+            peers = status.numPeers(),
+            seeds = status.numSeeds()
         )
     }
 
@@ -116,5 +105,7 @@ class TorrentManager(private val downloadDir: File) {
 data class TorrentStats(
     val progress: Float, 
     val downloadSpeed: Long,
-    val name: String
+    val name: String,
+    val peers: Int = 0,
+    val seeds: Int = 0
 )

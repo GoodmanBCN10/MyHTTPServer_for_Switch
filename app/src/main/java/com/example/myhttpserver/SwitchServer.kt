@@ -3,7 +3,6 @@ package com.example.myhttpserver
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
-import androidx.core.net.toFile
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
@@ -25,7 +24,7 @@ class SwitchServer(private val context: Context) {
         server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
             routing {
                 get("/") {
-                    // Combinar archivos de la carpeta seleccionada y la carpeta de descargas
+                    // Combinar archivos de la carpeta seleccionada y la carpeta de descargas interna
                     val safFiles = getFilesFromUri(directoryUri)
                     val torrentDir = context.getExternalFilesDir("downloads")
                     val torrentFiles = if (torrentDir != null) getFilesFromLocalDir(torrentDir) else emptyList()
@@ -118,7 +117,7 @@ class SwitchServer(private val context: Context) {
         return if (uri.scheme == "content") {
             context.contentResolver.openInputStream(uri)
         } else {
-            File(uri.path!!).inputStream()
+            File(uri.path ?: return null).inputStream()
         }
     }
 
@@ -127,13 +126,11 @@ class SwitchServer(private val context: Context) {
         server = null
         try {
             current?.stop(100, 500)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) {}
     }
 
     fun refresh() {
-        cachedFiles = emptyList() // Forzar re-escaneo en la próxima petición
+        cachedFiles = emptyList()
     }
 
     private fun getFilesFromUri(directoryUri: Uri): List<Triple<String, Uri, Long>> {

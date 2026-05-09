@@ -25,4 +25,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "My HTTP Server"
 include(":app")
- 

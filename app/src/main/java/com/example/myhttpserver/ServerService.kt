@@ -18,6 +18,7 @@ import java.io.File
 class ServerService : Service() {
     private var switchServer: SwitchServer? = null
     private var torrentManager: TorrentManager? = null
+    private var currentDirectoryUri: Uri? = null
     private val CHANNEL_ID = "SwitchServerChannel"
     private val NOTIFICATION_ID = 1
     
@@ -28,7 +29,7 @@ class ServerService : Service() {
     private val progressRunnable = object : Runnable {
         override fun run() {
             updateProgress()
-            handler.postDelayed(this, 1000)
+            handler.postDelayed(this, 1500) // Un poco más lento para reducir logs
         }
     }
 
@@ -47,8 +48,9 @@ class ServerService : Service() {
                 if (uriString != null) {
                     acquireLocks()
                     val uri = Uri.parse(uriString)
+                    currentDirectoryUri = uri
                     switchServer?.start(uri)
-                    startForeground(NOTIFICATION_ID, createNotification("Servidor Activo", "Sirviendo archivos a la Switch"))
+                    startForeground(NOTIFICATION_ID, createNotification("Servidor Activo", "Sirviendo archivos"))
                 }
             }
             "STOP" -> {
@@ -61,7 +63,7 @@ class ServerService : Service() {
                     ensureTorrentManager()
                     torrentManager?.downloadMagnet(magnetUri)
                     handler.post(progressRunnable)
-                    startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Iniciando descarga..."))
+                    startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Iniciando..."))
                 }
             }
             "START_TORRENT_FILE" -> {
@@ -75,26 +77,21 @@ class ServerService : Service() {
                         if (bytes != null) {
                             val torrentInfo = TorrentInfo.bdecode(bytes)
                             val name = torrentInfo.name()
-                            Log.d("ServerService", "Torrent cargado: $name")
                             
-                            // Enviar broadcast inicial para que la UI reaccione
                             val initIntent = Intent("TORRENT_PROGRESS").apply {
                                 setPackage(packageName)
-                                putExtra("progress", 0f)
-                                putExtra("speed", 0L)
                                 putExtra("name", name)
+                                putExtra("progress", 0f)
                             }
                             sendBroadcast(initIntent)
                             
                             torrentManager?.downloadTorrent(torrentInfo)
                             handler.post(progressRunnable)
-                            startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Cargando $name..."))
-                            
-                            // Re-escaneo de archivos para que el servidor lo vea de inmediato
+                            startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", name))
                             switchServer?.refresh()
                         }
                     } catch (e: Exception) {
-                        Log.e("ServerService", "Error cargando archivo torrent", e)
+                        Log.e("ServerService", "Error cargando .torrent", e)
                     }
                 }
             }
@@ -105,20 +102,49 @@ class ServerService : Service() {
 
     private fun ensureTorrentManager() {
         if (torrentManager == null) {
-            val downloadDir = getExternalFilesDir("downloads") ?: filesDir
+            val downloadDir = getDownloadDirectory()
             torrentManager = TorrentManager(downloadDir)
+        }
+    }
+
+    private fun getDownloadDirectory(): File {
+        currentDirectoryUri?.let { uri ->
+            val path = getPathFromUri(uri)
+            if (path != null) {
+                val file = File(path)
+                if (file.exists() && file.canWrite()) {
+                    return file
+                }
+            }
+        }
+        return getExternalFilesDir("downloads") ?: filesDir
+    }
+
+    private fun getPathFromUri(uri: Uri): String? {
+        return try {
+            val docId = android.provider.DocumentsContract.getTreeDocumentId(uri)
+            val split = docId.split(":")
+            val type = split[0]
+            if ("primary".equals(type, ignoreCase = true)) {
+                android.os.Environment.getExternalStorageDirectory().toString() + "/" + split[1]
+            } else {
+                "/storage/$type/${split[1]}"
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
     private fun updateProgress() {
         val stats = torrentManager?.getStats()
         if (stats != null) {
-            // Enviar broadcast a la Activity
             val intent = Intent("TORRENT_PROGRESS").apply {
                 setPackage(packageName)
                 putExtra("progress", stats.progress)
                 putExtra("speed", stats.downloadSpeed)
                 putExtra("name", stats.name)
+                putExtra("peers", stats.peers)
+                putExtra("seeds", stats.seeds)
             }
             sendBroadcast(intent)
 
@@ -127,8 +153,6 @@ class ServerService : Service() {
             val content = "${stats.name} - ${stats.progress.toInt()}% (${speedKb} KB/s)"
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.notify(NOTIFICATION_ID, createNotification("Descargando Juego", content))
-        } else if (torrentManager != null) {
-            Log.d("ServerService", "Esperando estadísticas del torrent...")
         }
     }
 
@@ -137,23 +161,21 @@ class ServerService : Service() {
         switchServer?.stop()
         torrentManager?.stop()
         releaseLocks()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopForeground(true)
         stopSelf()
     }
 
     private fun acquireLocks() {
         if (wakeLock == null) {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SwitchServer::WakeLock").apply {
-                acquire()
-            }
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SwitchServer::WakeLock")
+            wakeLock?.acquire()
         }
 
         if (wifiLock == null) {
             val wifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
-            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SwitchServer::WifiLock").apply {
-                acquire()
-            }
+            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SwitchServer::WifiLock")
+            wifiLock?.acquire()
         }
     }
 
