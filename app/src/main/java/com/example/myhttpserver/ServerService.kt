@@ -7,6 +7,7 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
+import android.util.Log
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
@@ -85,6 +86,8 @@ class ServerService : Service() {
             val content = "${stats.name} - ${stats.progress.toInt()}% (${speedKb} KB/s)"
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.notify(NOTIFICATION_ID, createNotification("Descargando Juego", content))
+        } else if (torrentManager != null) {
+            Log.d("ServerService", "Esperando estadísticas del torrent...")
         }
     }
 
