@@ -73,10 +73,22 @@ class ServerService : Service() {
                         val uri = Uri.parse(uriString)
                         val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         if (bytes != null) {
-                            val torrentInfo = TorrentInfo(bytes)
+                            val torrentInfo = TorrentInfo.bdecode(bytes)
+                            val name = torrentInfo.name()
+                            Log.d("ServerService", "Torrent cargado: $name")
+                            
+                            // Enviar broadcast inicial para que la UI reaccione
+                            val initIntent = Intent("TORRENT_PROGRESS").apply {
+                                setPackage(packageName)
+                                putExtra("progress", 0f)
+                                putExtra("speed", 0L)
+                                putExtra("name", name)
+                            }
+                            sendBroadcast(initIntent)
+                            
                             torrentManager?.downloadTorrent(torrentInfo)
                             handler.post(progressRunnable)
-                            startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Cargando archivo..."))
+                            startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Cargando $name..."))
                         }
                     } catch (e: Exception) {
                         Log.e("ServerService", "Error cargando archivo torrent", e)
@@ -99,10 +111,12 @@ class ServerService : Service() {
         val stats = torrentManager?.getStats()
         if (stats != null) {
             // Enviar broadcast a la Activity
-            val intent = Intent("TORRENT_PROGRESS")
-            intent.putExtra("progress", stats.progress)
-            intent.putExtra("speed", stats.downloadSpeed)
-            intent.putExtra("name", stats.name)
+            val intent = Intent("TORRENT_PROGRESS").apply {
+                setPackage(packageName)
+                putExtra("progress", stats.progress)
+                putExtra("speed", stats.downloadSpeed)
+                putExtra("name", stats.name)
+            }
             sendBroadcast(intent)
 
             // Actualizar notificación
