@@ -54,6 +54,22 @@ class TorrentManager(private val downloadDir: File) {
     }
 
     /**
+     * Inicia la descarga desde un archivo .torrent (TorrentInfo)
+     */
+    fun downloadTorrent(torrentInfo: TorrentInfo) {
+        if (!downloadDir.exists()) {
+            downloadDir.mkdirs()
+        }
+        try {
+            Log.d(TAG, "Iniciando descarga de archivo torrent: ${torrentInfo.name()}")
+            session.download(torrentInfo, downloadDir)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al iniciar descarga de torrent", e)
+            listener?.onError(e.message ?: "Error desconocido")
+        }
+    }
+
+    /**
      * Inicia la descarga de un enlace Magnet
      */
     fun downloadMagnet(magnetUri: String) {
