@@ -36,25 +36,20 @@ import com.example.myhttpserver.ui.theme.MyHTTPServerTheme
 
 class MainActivity : ComponentActivity() {
 
-    // Estado global para el progreso del torrent
     private var torrentProgress by mutableStateOf(0f)
     private var torrentSpeed by mutableStateOf(0L)
     private var torrentName by mutableStateOf("")
+    private var torrentPeers by mutableStateOf(0)
     private var isDownloading by mutableStateOf(false)
 
     private val torrentReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            android.util.Log.d("MainActivity", "Broadcast recibido: ${intent?.action}")
             if (intent?.action == "TORRENT_PROGRESS") {
-                val progress = intent.getFloatExtra("progress", 0f)
-                val speed = intent.getLongExtra("speed", 0L)
-                val name = intent.getStringExtra("name") ?: ""
-                
-                android.util.Log.d("MainActivity", "Progreso: $progress%, Speed: $speed, Name: $name")
-                
-                torrentProgress = progress
-                torrentSpeed = speed
-                torrentName = name
+                torrentProgress = intent.getFloatExtra("progress", 0f)
+                torrentSpeed = intent.getLongExtra("speed", 0L)
+                val receivedName = intent.getStringExtra("name") ?: ""
+                if (receivedName.isNotEmpty()) torrentName = receivedName
+                torrentPeers = intent.getIntExtra("peers", 0)
                 isDownloading = true
             }
         }
@@ -65,11 +60,11 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         
-        // Registrar el receptor de progreso
         val filter = IntentFilter("TORRENT_PROGRESS")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(torrentReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(torrentReceiver, filter)
         }
 
@@ -83,7 +78,8 @@ class MainActivity : ComponentActivity() {
                     isDownloading = isDownloading,
                     progress = torrentProgress,
                     speed = torrentSpeed,
-                    downloadName = if (torrentName.isEmpty() && isDownloading) "Buscando información..." else torrentName
+                    peers = torrentPeers,
+                    downloadName = torrentName
                 )
             }
         }
@@ -103,33 +99,25 @@ class MainActivity : ComponentActivity() {
 
     private fun startTorrentDownload(magnet: String) {
         isDownloading = true
+        torrentName = "Iniciando magnet..."
         val intent = Intent(this, ServerService::class.java).apply {
             action = "START_TORRENT"
             putExtra("magnetUri", magnet)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+        startService(intent)
     }
 
     private fun startTorrentFileDownload(uri: Uri) {
-        android.util.Log.d("MainActivity", "Iniciando descarga de archivo: $uri")
         isDownloading = true
+        torrentName = "Cargando archivo..."
         val intent = Intent(this, ServerService::class.java).apply {
             action = "START_TORRENT_FILE"
             putExtra("torrentUri", uri.toString())
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+        startService(intent)
     }
 
     private fun stopService() {
-        isDownloading = false
         val intent = Intent(this, ServerService::class.java).apply {
             action = "STOP"
         }
@@ -151,6 +139,7 @@ fun ServerScreen(
     isDownloading: Boolean,
     progress: Float,
     speed: Long,
+    peers: Int,
     downloadName: String
 ) {
     val context = LocalContext.current
@@ -176,13 +165,8 @@ fun ServerScreen(
     ) { uri ->
         if (uri != null) {
             try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) {}
             selectedUri = uri
         }
     }
@@ -190,9 +174,7 @@ fun ServerScreen(
     val torrentFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) {
-            onSelectTorrentFile(uri)
-        }
+        if (uri != null) onSelectTorrentFile(uri)
     }
 
     LaunchedEffect(isRunning) {
@@ -201,36 +183,22 @@ fun ServerScreen(
         }
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = Color.Black
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Image(
                 painter = painterResource(id = R.drawable.ic_logo),
                 contentDescription = "Logo",
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .height(170.dp)
-                    .padding(vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth(0.85f).height(170.dp).padding(vertical = 4.dp),
                 contentScale = ContentScale.Fit
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = "Switch HTTP Server + Torrent",
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text(text = "Switch HTTP Server + Torrent", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -273,17 +241,10 @@ fun ServerScreen(
             }
 
             Spacer(modifier = Modifier.height(32.dp))
-
             HorizontalDivider(color = Color.Gray, thickness = 0.5.dp)
-
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = "Gestor Torrent",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text(text = "Gestor Torrent", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
             if (isDownloading) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -293,16 +254,17 @@ fun ServerScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(text = downloadName, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(text = if (speed == 0L) "Buscando compañeros..." else "Conectado a $peers compañeros", color = Color.Cyan, fontSize = 12.sp)
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(
-                            progress = { progress / 100f },
+                            progress = { if (progress < 0.1f) 0.05f else progress / 100f },
                             modifier = Modifier.fillMaxWidth(),
                             color = Color.Cyan,
                             trackColor = Color.DarkGray,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(text = "${progress.toInt()}%", color = Color.Gray, fontSize = 12.sp)
+                            Text(text = "${String.format("%.1f", progress)}%", color = Color.Gray, fontSize = 12.sp)
                             Text(text = "${speed / 1024} KB/s", color = Color.Gray, fontSize = 12.sp)
                         }
                     }

@@ -59,9 +59,12 @@ dependencies {
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.status.pages)
     implementation(libs.androidx.documentfile)
-    implementation("com.frostwire:jlibtorrent:1.2.19.0")
-    implementation("com.frostwire:jlibtorrent-android-arm64:1.2.19.0")
-    implementation("com.frostwire:jlibtorrent-android-arm:1.2.19.0")
+    
+    // Torrent
+    implementation(libs.jlibtorrent)
+    implementation(libs.jlibtorrent.android.arm64)
+    implementation(libs.jlibtorrent.android.arm)
+
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
