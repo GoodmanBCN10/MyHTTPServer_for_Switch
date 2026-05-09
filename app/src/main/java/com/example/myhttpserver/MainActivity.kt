@@ -1,7 +1,10 @@
 package com.example.myhttpserver
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -33,16 +36,46 @@ import com.example.myhttpserver.ui.theme.MyHTTPServerTheme
 
 class MainActivity : ComponentActivity() {
 
+    // Estado global para el progreso del torrent
+    private var torrentProgress by mutableStateOf(0f)
+    private var torrentSpeed by mutableStateOf(0L)
+    private var torrentName by mutableStateOf("")
+    private var isDownloading by mutableStateOf(false)
+
+    private val torrentReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "TORRENT_PROGRESS") {
+                torrentProgress = intent.getFloatExtra("progress", 0f)
+                torrentSpeed = intent.getLongExtra("speed", 0L)
+                torrentName = intent.getStringExtra("name") ?: ""
+                isDownloading = true
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
+        
+        // Registrar el receptor de progreso
+        val filter = IntentFilter("TORRENT_PROGRESS")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(torrentReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(torrentReceiver, filter)
+        }
+
         setContent {
             MyHTTPServerTheme {
                 ServerScreen(
                     onStartServer = { uri -> startService(uri) },
                     onStopServer = { stopService() },
-                    onStartTorrent = { magnet -> startTorrentDownload(magnet) }
+                    onStartTorrent = { magnet -> startTorrentDownload(magnet) },
+                    isDownloading = isDownloading,
+                    progress = torrentProgress,
+                    speed = torrentSpeed,
+                    downloadName = torrentName
                 )
             }
         }
@@ -61,6 +94,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startTorrentDownload(magnet: String) {
+        isDownloading = true
         val intent = Intent(this, ServerService::class.java).apply {
             action = "START_TORRENT"
             putExtra("magnetUri", magnet)
@@ -73,10 +107,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopService() {
+        isDownloading = false
         val intent = Intent(this, ServerService::class.java).apply {
             action = "STOP"
         }
         startService(intent)
+    }
+
+    override fun onDestroy() {
+        unregisterReceiver(torrentReceiver)
+        super.onDestroy()
     }
 }
 
@@ -84,7 +124,11 @@ class MainActivity : ComponentActivity() {
 fun ServerScreen(
     onStartServer: (Uri) -> Unit, 
     onStopServer: () -> Unit,
-    onStartTorrent: (String) -> Unit
+    onStartTorrent: (String) -> Unit,
+    isDownloading: Boolean,
+    progress: Float,
+    speed: Long,
+    downloadName: String
 ) {
     val context = LocalContext.current
     var selectedUri by rememberSaveable { mutableStateOf<Uri?>(null) }
@@ -210,7 +254,31 @@ fun ServerScreen(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            if (isDownloading) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(text = downloadName, color = Color.White, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { progress / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color.Cyan,
+                            trackColor = Color.DarkGray,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(text = "${progress.toInt()}%", color = Color.Gray, fontSize = 12.sp)
+                            Text(text = "${speed / 1024} KB/s", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = magnetUri,
