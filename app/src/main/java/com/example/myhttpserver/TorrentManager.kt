@@ -74,10 +74,10 @@ class TorrentManager(private val downloadDir: File) {
      * Obtiene estadísticas actuales del primer torrent activo
      */
     fun getStats(): TorrentStats? {
-        val torrents = session.torrents()
-        if (torrents.isEmpty()) return null
+        val torrents = session.swig().get_torrents()
+        if (torrents == null || torrents.empty()) return null
         
-        val handle = torrents.first()
+        val handle = TorrentHandle(torrents.get(0))
         val status = handle.status()
         
         return TorrentStats(
