@@ -1,5 +1,5 @@
 [versions]
-agp = "9.2.0"
+agp = "9.2.1"
 coreKtx = "1.18.0"
 junit = "4.13.2"
 junitVersion = "1.3.0"
@@ -31,8 +31,8 @@ ktor-server-core = { group = "io.ktor", name = "ktor-server-core-jvm", version.r
 ktor-server-netty = { group = "io.ktor", name = "ktor-server-netty-jvm", version.ref = "ktor" }
 ktor-server-status-pages = { group = "io.ktor", name = "ktor-server-status-pages-jvm", version.ref = "ktor" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
-jlibtorrent = { group = "org.frostwire", name = "jlibtorrent", version.ref = "jlibtorrent" }
-jlibtorrent-extension = { group = "org.frostwire", name = "jlibtorrent-extension", version.ref = "jlibtorrent" }
+jlibtorrent = { group = "com.frostwire", name = "jlibtorrent", version.ref = "jlibtorrent" }
+jlibtorrent-native = { group = "com.frostwire", name = "jlibtorrent-android", version.ref = "jlibtorrent" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
