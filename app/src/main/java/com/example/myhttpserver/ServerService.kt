@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.util.Log
 import android.os.IBinder
@@ -22,14 +23,11 @@ class ServerService : Service() {
     private val CHANNEL_ID = "SwitchServerChannel"
     private val NOTIFICATION_ID = 1
     
-    private var wakeLock: PowerManager.WakeLock? = null
-    private var wifiLock: WifiManager.WifiLock? = null
-    
     private val handler = Handler(Looper.getMainLooper())
     private val progressRunnable = object : Runnable {
         override fun run() {
             updateProgress()
-            handler.postDelayed(this, 1500) // Un poco más lento para reducir logs
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -41,62 +39,43 @@ class ServerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        
         when (action) {
             "START" -> {
                 val uriString = intent.getStringExtra("directoryUri")
                 if (uriString != null) {
-                    acquireLocks()
                     val uri = Uri.parse(uriString)
                     currentDirectoryUri = uri
                     switchServer?.start(uri)
                     startForeground(NOTIFICATION_ID, createNotification("Servidor Activo", "Sirviendo archivos"))
                 }
             }
-            "STOP" -> {
-                stopAll()
-            }
-            "START_TORRENT" -> {
-                val magnetUri = intent.getStringExtra("magnetUri")
-                if (magnetUri != null) {
-                    acquireLocks()
-                    ensureTorrentManager()
-                    torrentManager?.downloadMagnet(magnetUri)
-                    handler.post(progressRunnable)
-                    startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", "Iniciando..."))
-                }
-            }
+            "STOP" -> stopAll()
             "START_TORRENT_FILE" -> {
                 val uriString = intent.getStringExtra("torrentUri")
                 if (uriString != null) {
-                    acquireLocks()
                     ensureTorrentManager()
                     try {
                         val uri = Uri.parse(uriString)
                         val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         if (bytes != null) {
                             val torrentInfo = TorrentInfo.bdecode(bytes)
-                            val name = torrentInfo.name()
-                            
-                            val initIntent = Intent("TORRENT_PROGRESS").apply {
-                                setPackage(packageName)
-                                putExtra("name", name)
-                                putExtra("progress", 0f)
-                            }
-                            sendBroadcast(initIntent)
-                            
                             torrentManager?.downloadTorrent(torrentInfo)
                             handler.post(progressRunnable)
-                            startForeground(NOTIFICATION_ID, createNotification("Descargando Torrent", name))
-                            switchServer?.refresh()
                         }
                     } catch (e: Exception) {
                         Log.e("ServerService", "Error cargando .torrent", e)
                     }
                 }
             }
+            "REMOVE_TORRENT" -> {
+                val id = intent.getStringExtra("torrentId")
+                if (id != null) {
+                    Log.d("ServerService", "Quitando torrent: $id")
+                    torrentManager?.removeTorrent(id)
+                    updateProgress() // Actualizar inmediatamente la UI
+                }
+            }
         }
-
         return START_NOT_STICKY
     }
 
@@ -108,51 +87,52 @@ class ServerService : Service() {
     }
 
     private fun getDownloadDirectory(): File {
-        currentDirectoryUri?.let { uri ->
-            val path = getPathFromUri(uri)
-            if (path != null) {
-                val file = File(path)
-                if (file.exists() && file.canWrite()) {
-                    return file
-                }
-            }
-        }
-        return getExternalFilesDir("downloads") ?: filesDir
-    }
-
-    private fun getPathFromUri(uri: Uri): String? {
-        return try {
-            val docId = android.provider.DocumentsContract.getTreeDocumentId(uri)
-            val split = docId.split(":")
-            val type = split[0]
-            if ("primary".equals(type, ignoreCase = true)) {
-                android.os.Environment.getExternalStorageDirectory().toString() + "/" + split[1]
-            } else {
-                "/storage/$type/${split[1]}"
-            }
-        } catch (e: Exception) {
-            null
-        }
+        val publicDownloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+        if (publicDownloadDir.exists() && publicDownloadDir.canWrite()) return publicDownloadDir
+        return getExternalFilesDir(null) ?: filesDir
     }
 
     private fun updateProgress() {
-        val stats = torrentManager?.getStats()
-        if (stats != null) {
-            val intent = Intent("TORRENT_PROGRESS").apply {
-                setPackage(packageName)
-                putExtra("progress", stats.progress)
-                putExtra("speed", stats.downloadSpeed)
-                putExtra("name", stats.name)
-                putExtra("peers", stats.peers)
-                putExtra("seeds", stats.seeds)
-            }
-            sendBroadcast(intent)
+        val allStats = torrentManager?.getAllStats() ?: emptyList()
 
-            // Actualizar notificación
-            val speedKb = stats.downloadSpeed / 1024
-            val content = "${stats.name} - ${stats.progress.toInt()}% (${speedKb} KB/s)"
+        val statsBundles = ArrayList<Bundle>()
+        allStats.forEach { stats ->
+            val b = Bundle().apply {
+                putString("id", stats.id)
+                putString("name", stats.name)
+                putFloat("progress", stats.progress)
+                putLong("speed", stats.downloadSpeed)
+                putInt("peers", stats.peers)
+                putInt("seeds", stats.seeds)
+                putInt("dht", stats.dhtNodes)
+                putString("state", stats.state)
+            }
+            statsBundles.add(b)
+        }
+
+        val intent = Intent("TORRENT_PROGRESS").apply {
+            setPackage(packageName)
+            putParcelableArrayListExtra("stats_list", statsBundles)
+        }
+        sendBroadcast(intent)
+
+        // Actualizar notificación
+        if (allStats.isNotEmpty()) {
+            val mainStats = allStats[0]
+            val speedTotal = allStats.sumOf { it.downloadSpeed } / 1024
+            val content = if (allStats.size > 1) {
+                "Bajando ${allStats.size} juegos (${speedTotal} KB/s)"
+            } else {
+                "${mainStats.name} - ${mainStats.progress.toInt()}% (${speedTotal} KB/s)"
+            }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.notify(NOTIFICATION_ID, createNotification("Descargando Juego", content))
+            notificationManager.notify(NOTIFICATION_ID, createNotification("Descargando Juegos", content))
+        } else {
+            // Si no hay torrents, restaurar notificación del servidor si está activo
+            if (currentDirectoryUri != null) {
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.notify(NOTIFICATION_ID, createNotification("Servidor Activo", "Sirviendo archivos"))
+            }
         }
     }
 
@@ -160,41 +140,15 @@ class ServerService : Service() {
         handler.removeCallbacks(progressRunnable)
         switchServer?.stop()
         torrentManager?.stop()
-        releaseLocks()
         stopForeground(true)
         stopSelf()
-    }
-
-    private fun acquireLocks() {
-        if (wakeLock == null) {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SwitchServer::WakeLock")
-            wakeLock?.acquire()
-        }
-
-        if (wifiLock == null) {
-            val wifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
-            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SwitchServer::WifiLock")
-            wifiLock?.acquire()
-        }
-    }
-
-    private fun releaseLocks() {
-        wakeLock?.let { if (it.isHeld) it.release() }
-        wakeLock = null
-        wifiLock?.let { if (it.isHeld) it.release() }
-        wifiLock = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotification(title: String, content: String): Notification {
         val notificationIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
+        val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
@@ -206,11 +160,7 @@ class ServerService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                CHANNEL_ID,
-                "Switch Server Service Channel",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val serviceChannel = NotificationChannel(CHANNEL_ID, "Server Channel", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(serviceChannel)
         }

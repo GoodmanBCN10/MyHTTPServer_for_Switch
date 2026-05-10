@@ -2,110 +2,112 @@ package com.example.myhttpserver
 
 import android.util.Log
 import com.frostwire.jlibtorrent.*
-import com.frostwire.jlibtorrent.alerts.Alert
-import com.frostwire.jlibtorrent.alerts.AlertType
-import com.frostwire.jlibtorrent.alerts.TorrentFinishedAlert
+import com.frostwire.jlibtorrent.swig.settings_pack
 import java.io.File
 
 class TorrentManager(private val downloadDir: File) {
     private val session = SessionManager()
     private val TAG = "TorrentManager"
 
-    interface TorrentListener {
-        fun onProgress(progress: Float, speed: Long)
-        fun onFinished(file: File)
-        fun onError(message: String)
-    }
-
-    private var listener: TorrentListener? = null
-
     init {
         val settings = SettingsPack()
-        
-        // Identidad confiable
-        settings.setString(com.frostwire.jlibtorrent.swig.settings_pack.string_types.user_agent.swigValue(), "qBittorrent/4.5.2")
-        
-        // Red y Puertos
+        settings.setString(settings_pack.string_types.user_agent.swigValue(), "uTorrent/3550(45507)")
         settings.listenInterfaces("0.0.0.0:6881")
         settings.enableDht(true)
         
-        session.start(SessionParams(settings))
+        // Límites globales para múltiples descargas
+        settings.activeLimit(20)
+        settings.activeDownloads(10)
+        settings.connectionsLimit(500)
         
-        session.addListener(object : AlertListener {
-            override fun types(): IntArray? = null
-
-            override fun alert(alert: Alert<*>) {
-                val type = alert.type()
-                
-                when (type) {
-                    AlertType.TORRENT_FINISHED -> {
-                        Log.d(TAG, "Descarga finalizada")
-                        listener?.onFinished(downloadDir)
-                    }
-                    AlertType.TORRENT_ERROR -> {
-                        Log.e(TAG, "Error en torrent: ${alert.swig().message()}")
-                        listener?.onError(alert.swig().message())
-                    }
-                    else -> {}
-                }
-            }
-        })
-    }
-
-    fun setListener(listener: TorrentListener) {
-        this.listener = listener
+        session.start(SessionParams(settings))
     }
 
     fun downloadTorrent(torrentInfo: TorrentInfo) {
         if (!downloadDir.exists()) downloadDir.mkdirs()
         try {
-            Log.d(TAG, "Iniciando torrent: ${torrentInfo.name()}")
+            Log.d(TAG, "Añadiendo torrent a la cola: ${torrentInfo.name()}")
             session.download(torrentInfo, downloadDir)
+            
+            // Forzar anuncio inicial para el nuevo torrent
+            val torrents = session.swig().get_torrents()
+            if (!torrents.empty()) {
+                val lastHandle = TorrentHandle(torrents.get(torrents.size().toInt() - 1))
+                lastHandle.resume()
+                lastHandle.forceReannounce()
+            }
             session.swig().post_torrent_updates()
         } catch (e: Exception) {
-            Log.e(TAG, "Error al iniciar", e)
+            Log.e(TAG, "Error al añadir torrent", e)
         }
     }
 
-    fun downloadMagnet(magnetUri: String) {
-        if (!downloadDir.exists()) downloadDir.mkdirs()
-        try {
-            session.download(magnetUri, downloadDir)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error al iniciar magnet", e)
-        }
-    }
-
-    fun getStats(): TorrentStats? {
+    /**
+     * Obtiene estadísticas de TODOS los torrents activos
+     */
+    fun getAllStats(): List<TorrentStats> {
+        val statsList = mutableListOf<TorrentStats>()
         val torrents = session.swig().get_torrents()
-        if (torrents == null || torrents.empty()) return null
         
-        val handle = TorrentHandle(torrents.get(0))
-        val status = handle.status()
-        
-        // Solo forzar re-anuncio si realmente estamos buscando
-        if (status.numPeers() == 0 && status.progress() < 1.0) {
-            handle.forceReannounce()
+        if (torrents == null || torrents.empty()) return statsList
+
+        val dhtNodes = session.stats().dhtNodes().toInt()
+
+        for (i in 0 until torrents.size().toInt()) {
+            val handle = TorrentHandle(torrents.get(i))
+            val status = handle.status()
+            
+            val name = if (status.name().isNullOrEmpty()) {
+                if (handle.name().isNullOrEmpty()) "Descargando..." else handle.name()
+            } else {
+                status.name()
+            }
+
+            statsList.add(TorrentStats(
+                id = handle.infoHash().toString(),
+                progress = status.progress() * 100,
+                downloadSpeed = status.downloadPayloadRate().toLong(),
+                name = name,
+                peers = status.numPeers(),
+                seeds = status.numSeeds(),
+                dhtNodes = dhtNodes,
+                state = status.state().toString()
+            ))
+            
+            // Auto-reanuncio si no hay peers
+            if (status.numPeers() == 0 && status.progress() < 1.0) {
+                handle.forceReannounce()
+            }
         }
         
-        return TorrentStats(
-            progress = status.progress() * 100,
-            downloadSpeed = status.downloadPayloadRate().toLong(),
-            name = if (status.name().isEmpty()) "Cargando..." else status.name(),
-            peers = status.numPeers(),
-            seeds = status.numSeeds()
-        )
+        return statsList
     }
 
     fun stop() {
         session.stop()
     }
+
+    fun removeTorrent(id: String) {
+        val torrents = session.swig().get_torrents()
+        if (torrents == null || torrents.empty()) return
+
+        for (i in 0 until torrents.size().toInt()) {
+            val handle = TorrentHandle(torrents.get(i))
+            if (handle.infoHash().toString() == id) {
+                session.remove(handle)
+                break
+            }
+        }
+    }
 }
 
 data class TorrentStats(
+    val id: String,
     val progress: Float, 
     val downloadSpeed: Long,
     val name: String,
     val peers: Int = 0,
-    val seeds: Int = 0
+    val seeds: Int = 0,
+    val dhtNodes: Int = 0,
+    val state: String = ""
 )
