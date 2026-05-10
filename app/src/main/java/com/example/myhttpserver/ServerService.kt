@@ -1,17 +1,14 @@
 package com.example.myhttpserver
 
 import android.app.*
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.net.wifi.WifiManager
-import android.os.Build
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.util.Log
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.frostwire.jlibtorrent.TorrentInfo
 import java.io.File
@@ -60,19 +57,20 @@ class ServerService : Service() {
                         if (bytes != null) {
                             val torrentInfo = TorrentInfo.bdecode(bytes)
                             torrentManager?.downloadTorrent(torrentInfo)
+                            
+                            // Asegurar que solo hay un loop de progreso
+                            handler.removeCallbacks(progressRunnable)
                             handler.post(progressRunnable)
                         }
                     } catch (e: Exception) {
-                        Log.e("ServerService", "Error cargando .torrent", e)
+                        Log.e("ServerService", "Error cargando torrent", e)
                     }
                 }
             }
             "REMOVE_TORRENT" -> {
                 val id = intent.getStringExtra("torrentId")
                 if (id != null) {
-                    Log.d("ServerService", "Quitando torrent: $id")
                     torrentManager?.removeTorrent(id)
-                    updateProgress() // Actualizar inmediatamente la UI
                 }
             }
         }
@@ -87,17 +85,23 @@ class ServerService : Service() {
     }
 
     private fun getDownloadDirectory(): File {
+        // Carpeta pública de descargas
         val publicDownloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-        if (publicDownloadDir.exists() && publicDownloadDir.canWrite()) return publicDownloadDir
-        return getExternalFilesDir(null) ?: filesDir
+        
+        // Intentar usar Download pública, si no, usar la interna de la app
+        return if (publicDownloadDir.exists() && publicDownloadDir.canWrite()) {
+            publicDownloadDir
+        } else {
+            getExternalFilesDir("downloads") ?: filesDir
+        }
     }
 
     private fun updateProgress() {
         val allStats = torrentManager?.getAllStats() ?: emptyList()
-
         val statsBundles = ArrayList<Bundle>()
+        
         allStats.forEach { stats ->
-            val b = Bundle().apply {
+            statsBundles.add(Bundle().apply {
                 putString("id", stats.id)
                 putString("name", stats.name)
                 putFloat("progress", stats.progress)
@@ -106,8 +110,7 @@ class ServerService : Service() {
                 putInt("seeds", stats.seeds)
                 putInt("dht", stats.dhtNodes)
                 putString("state", stats.state)
-            }
-            statsBundles.add(b)
+            })
         }
 
         val intent = Intent("TORRENT_PROGRESS").apply {
@@ -116,23 +119,11 @@ class ServerService : Service() {
         }
         sendBroadcast(intent)
 
-        // Actualizar notificación
         if (allStats.isNotEmpty()) {
-            val mainStats = allStats[0]
-            val speedTotal = allStats.sumOf { it.downloadSpeed } / 1024
-            val content = if (allStats.size > 1) {
-                "Bajando ${allStats.size} juegos (${speedTotal} KB/s)"
-            } else {
-                "${mainStats.name} - ${mainStats.progress.toInt()}% (${speedTotal} KB/s)"
-            }
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.notify(NOTIFICATION_ID, createNotification("Descargando Juegos", content))
-        } else {
-            // Si no hay torrents, restaurar notificación del servidor si está activo
-            if (currentDirectoryUri != null) {
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.notify(NOTIFICATION_ID, createNotification("Servidor Activo", "Sirviendo archivos"))
-            }
+            val totalSpeed = allStats.sumOf { it.downloadSpeed } / 1024
+            val content = "Bajando ${allStats.size} juegos (${totalSpeed} KB/s)"
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, createNotification("Gestor Torrent", content))
         }
     }
 
@@ -160,7 +151,7 @@ class ServerService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(CHANNEL_ID, "Server Channel", NotificationManager.IMPORTANCE_LOW)
+            val serviceChannel = NotificationChannel(CHANNEL_ID, "MyServerChannel", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(serviceChannel)
         }

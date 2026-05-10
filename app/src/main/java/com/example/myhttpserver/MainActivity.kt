@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -31,11 +33,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.myhttpserver.ui.theme.MyHTTPServerTheme
 
 class MainActivity : ComponentActivity() {
 
-    // Lista reactiva de torrents activos
     private val torrentsList = mutableStateListOf<TorrentStats>()
 
     private val torrentReceiver = object : BroadcastReceiver() {
@@ -61,7 +65,6 @@ class MainActivity : ComponentActivity() {
                             state = b.getString("state", "")
                         )
                     }
-                    
                     torrentsList.clear()
                     torrentsList.addAll(newList)
                 }
@@ -148,11 +151,40 @@ fun ServerScreen(
     var selectedUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var isRunning by rememberSaveable { mutableStateOf(false) }
     var ipAddress by remember { mutableStateOf("No conectado") }
+    
+    var hasAllFilesPermission by remember { 
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                true
+            }
+        )
+    }
+
+    // Observador para detectar cuándo vuelves a la app y actualizar el permiso
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasAllFilesPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Environment.isExternalStorageManager()
+                } else {
+                    true
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {}
 
+    // Escuchar cuando el usuario vuelve de la configuración de permisos
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -197,41 +229,57 @@ fun ServerScreen(
                 contentScale = ContentScale.Fit
             )
 
+            if (!hasAllFilesPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF621B1B))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Faltan permisos", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Para descargar en carpetas públicas se necesita acceso total.", color = Color.LightGray, fontSize = 12.sp)
+                        Button(
+                            onClick = {
+                                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.padding(top = 8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                        ) {
+                            Text("Conceder Acceso")
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(text = "Gestor Torrent", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-            // LISTA DINÁMICA DE TORRENTS
             torrents.forEach { stats ->
                 Spacer(modifier = Modifier.height(12.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = stats.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { onRemoveTorrent(stats.id) }) {
-                                Text("Quitar", color = Color.Red, fontSize = 12.sp)
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(text = stats.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text(text = "[${stats.state}] Compañeros: ${stats.peers} | Nodos: ${stats.dhtNodes}", color = Color.Cyan, fontSize = 11.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { if (stats.progress < 0.1f) 0.05f else stats.progress / 100f },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color.Cyan,
+                                trackColor = Color.DarkGray,
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(text = "${String.format("%.1f", stats.progress)}%", color = Color.Gray, fontSize = 11.sp)
+                                Text(text = "${stats.downloadSpeed / 1024} KB/s", color = Color.Gray, fontSize = 11.sp)
                             }
                         }
-                        Text(
-                            text = "[${stats.state}] Compañeros: ${stats.peers} | Nodos: ${stats.dhtNodes}", 
-                            color = Color.Cyan, 
-                            fontSize = 11.sp
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { if (stats.progress < 0.1f) 0.05f else stats.progress / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Color.Cyan,
-                            trackColor = Color.DarkGray,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(text = "${String.format("%.1f", stats.progress)}%", color = Color.Gray, fontSize = 11.sp)
-                            Text(text = "${stats.downloadSpeed / 1024} KB/s", color = Color.Gray, fontSize = 11.sp)
-                        }
+                    }
+                    TextButton(onClick = { onRemoveTorrent(stats.id) }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("Quitar", color = Color.Red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -263,10 +311,7 @@ fun ServerScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Button(
-                onClick = { launcher.launch(null) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
-            ) {
+            Button(onClick = { launcher.launch(null) }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) {
                 Text(text = if (selectedUri == null) "1. Seleccionar Carpeta SD" else "Carpeta Lista")
             }
 
@@ -285,11 +330,33 @@ fun ServerScreen(
                     }
                 },
                 enabled = selectedUri != null,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isRunning) Color.Red else Color(0xFF4CAF50)
-                )
+                colors = ButtonDefaults.buttonColors(containerColor = if (isRunning) Color.Red else Color(0xFF4CAF50))
             ) {
                 Text(text = if (isRunning) "2. Detener Servidor" else "2. Iniciar Servidor")
+            }
+
+            Spacer(modifier = Modifier.height(48.dp))
+            HorizontalDivider(color = Color.DarkGray, thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Apoya el proyecto",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Button(
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.paypal.me/GoodmanBCN"))
+                    context.startActivity(intent)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0070BA)),
+                modifier = Modifier.padding(bottom = 32.dp)
+            ) {
+                Text("Donar con PayPal", color = Color.White)
             }
         }
     }
