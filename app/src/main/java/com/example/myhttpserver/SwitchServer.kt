@@ -24,12 +24,19 @@ class SwitchServer(private val context: Context) {
         server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
             routing {
                 get("/") {
-                    // Combinar archivos de la carpeta seleccionada y la carpeta de descargas interna
+                    // Combinar archivos de la carpeta seleccionada y la carpeta de descargas (pública e interna)
                     val safFiles = getFilesFromUri(directoryUri)
-                    val torrentDir = context.getExternalFilesDir("downloads")
-                    val torrentFiles = if (torrentDir != null) getFilesFromLocalDir(torrentDir) else emptyList()
                     
-                    cachedFiles = safFiles + torrentFiles
+                    val internalTorrentDir = context.getExternalFilesDir("downloads")
+                    val internalFiles = if (internalTorrentDir != null) getFilesFromLocalDir(internalTorrentDir) else emptyList()
+                    
+                    val publicTorrentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    val publicFiles = if (publicTorrentDir.exists()) getFilesFromLocalDir(publicTorrentDir) else emptyList()
+                    
+                    // Eliminar duplicados por nombre si existieran
+                    val allFilesMap = mutableMapOf<String, Triple<String, Uri, Long>>()
+                    (safFiles + internalFiles + publicFiles).forEach { allFilesMap[it.first] = it }
+                    cachedFiles = allFilesMap.values.toList()
                     
                     val html = buildString {
                         append("<!DOCTYPE html><html><body>\n")
