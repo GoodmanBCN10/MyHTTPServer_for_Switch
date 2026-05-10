@@ -55,10 +55,13 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.status.pages)
     implementation(libs.androidx.documentfile)
+    implementation(libs.commons.compress)
+    implementation(libs.xz)
     
     // Torrent
     implementation(libs.jlibtorrent)

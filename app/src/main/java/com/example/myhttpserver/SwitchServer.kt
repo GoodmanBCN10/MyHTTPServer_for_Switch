@@ -24,7 +24,7 @@ class SwitchServer(private val context: Context) {
         server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
             routing {
                 get("/") {
-                    // Combinar archivos de la carpeta seleccionada y la carpeta de descargas (pública e interna)
+                    // Combinar archivos de la carpeta seleccionada y la carpeta de descargas
                     val safFiles = getFilesFromUri(directoryUri)
                     
                     val internalTorrentDir = context.getExternalFilesDir("downloads")
@@ -33,13 +33,12 @@ class SwitchServer(private val context: Context) {
                     val publicTorrentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
                     val publicFiles = if (publicTorrentDir.exists()) getFilesFromLocalDir(publicTorrentDir) else emptyList()
                     
-                    // Eliminar duplicados por nombre si existieran
                     val allFilesMap = mutableMapOf<String, Triple<String, Uri, Long>>()
                     (safFiles + internalFiles + publicFiles).forEach { allFilesMap[it.first] = it }
                     cachedFiles = allFilesMap.values.toList()
                     
                     val html = buildString {
-                        append("<!DOCTYPE html><html><body>\n")
+                        append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body>\n")
                         append("<h2>Archivos disponibles</h2>")
                         cachedFiles.forEach { (name, _, _) ->
                             append("<a href=\"${Uri.encode(name)}\">$name</a><br>\n")
@@ -58,9 +57,12 @@ class SwitchServer(private val context: Context) {
                         val fileUri = fileTriple.second
                         val size = fileTriple.third
                         
+                        // Agregar cabeceras para evitar timeouts en DBI
+                        call.response.header(HttpHeaders.AcceptRanges, "bytes")
+                        call.response.header(HttpHeaders.Connection, "keep-alive")
+
                         if (call.request.local.method == HttpMethod.Head) {
                             call.response.header(HttpHeaders.ContentLength, size.toString())
-                            call.response.header(HttpHeaders.AcceptRanges, "bytes")
                             call.respond(HttpStatusCode.OK)
                             return@handle
                         }
@@ -75,43 +77,19 @@ class SwitchServer(private val context: Context) {
 
                                 call.response.header(HttpHeaders.ContentRange, "bytes $start-$end/$size")
                                 call.response.header(HttpHeaders.ContentLength, contentLength.toString())
-                                call.response.header(HttpHeaders.AcceptRanges, "bytes")
                                 
                                 call.respondOutputStream(ContentType.Application.OctetStream, HttpStatusCode.PartialContent) {
-                                    val out = this
-                                    withContext(Dispatchers.IO) {
-                                        openInputStream(fileUri)?.use { input ->
-                                            input.skip(start)
-                                            val buffer = ByteArray(256 * 1024)
-                                            var remaining = contentLength
-                                            while (remaining > 0) {
-                                                val toRead = if (remaining > buffer.size) buffer.size else remaining.toInt()
-                                                val read = input.read(buffer, 0, toRead)
-                                                if (read == -1) break
-                                                out.write(buffer, 0, read)
-                                                remaining -= read
-                                            }
-                                        }
-                                    }
+                                    transferData(fileUri, start, contentLength, this)
                                 }
                                 return@handle
-                            } catch (e: Exception) {}
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
                         }
 
                         call.response.header(HttpHeaders.ContentLength, size.toString())
-                        call.response.header(HttpHeaders.AcceptRanges, "bytes")
-                        
                         call.respondOutputStream(ContentType.Application.OctetStream, HttpStatusCode.OK) {
-                            val out = this
-                            withContext(Dispatchers.IO) {
-                                openInputStream(fileUri)?.use { input ->
-                                    val buffer = ByteArray(256 * 1024)
-                                    var read: Int
-                                    while (input.read(buffer).also { read = it } != -1) {
-                                        out.write(buffer, 0, read)
-                                    }
-                                }
-                            }
+                            transferData(fileUri, 0, size, this)
                         }
                     }
                 }
@@ -120,11 +98,40 @@ class SwitchServer(private val context: Context) {
         server?.start(wait = false)
     }
 
+    private suspend fun transferData(uri: Uri, start: Long, length: Long, outputStream: java.io.OutputStream) {
+        withContext(Dispatchers.IO) {
+            openInputStream(uri)?.use { input ->
+                // Skip robusto para Android
+                var skipped = 0L
+                while (skipped < start) {
+                    val n = input.skip(start - skipped)
+                    if (n <= 0) break
+                    skipped += n
+                }
+                
+                val buffer = ByteArray(1024 * 1024) // 1MB buffer para velocidad y estabilidad
+                var remaining = length
+                while (remaining > 0) {
+                    val toRead = if (remaining > buffer.size) buffer.size else remaining.toInt()
+                    val read = input.read(buffer, 0, toRead)
+                    if (read <= 0) break
+                    outputStream.write(buffer, 0, read)
+                    remaining -= read
+                }
+                outputStream.flush()
+            }
+        }
+    }
+
     private fun openInputStream(uri: Uri): InputStream? {
-        return if (uri.scheme == "content") {
-            context.contentResolver.openInputStream(uri)
-        } else {
-            File(uri.path ?: return null).inputStream()
+        return try {
+            if (uri.scheme == "content") {
+                context.contentResolver.openInputStream(uri)
+            } else {
+                File(uri.path ?: return null).inputStream()
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -132,7 +139,7 @@ class SwitchServer(private val context: Context) {
         val current = server
         server = null
         try {
-            current?.stop(100, 500)
+            current?.stop(500, 1000)
         } catch (e: Exception) {}
     }
 
