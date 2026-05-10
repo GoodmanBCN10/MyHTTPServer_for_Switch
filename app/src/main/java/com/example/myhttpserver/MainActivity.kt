@@ -1,6 +1,5 @@
 package com.example.myhttpserver
 
-import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -36,21 +35,36 @@ import com.example.myhttpserver.ui.theme.MyHTTPServerTheme
 
 class MainActivity : ComponentActivity() {
 
-    private var torrentProgress by mutableStateOf(0f)
-    private var torrentSpeed by mutableStateOf(0L)
-    private var torrentName by mutableStateOf("")
-    private var torrentPeers by mutableStateOf(0)
-    private var isDownloading by mutableStateOf(false)
+    // Lista reactiva de torrents activos
+    private val torrentsList = mutableStateListOf<TorrentStats>()
 
     private val torrentReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "TORRENT_PROGRESS") {
-                torrentProgress = intent.getFloatExtra("progress", 0f)
-                torrentSpeed = intent.getLongExtra("speed", 0L)
-                val receivedName = intent.getStringExtra("name") ?: ""
-                if (receivedName.isNotEmpty()) torrentName = receivedName
-                torrentPeers = intent.getIntExtra("peers", 0)
-                isDownloading = true
+                val statsBundles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableArrayListExtra("stats_list", Bundle::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableArrayListExtra("stats_list")
+                }
+                
+                statsBundles?.let { bundles ->
+                    val newList = bundles.map { b ->
+                        TorrentStats(
+                            id = b.getString("id", ""),
+                            name = b.getString("name", "Cargando..."),
+                            progress = b.getFloat("progress", 0f),
+                            downloadSpeed = b.getLong("speed", 0L),
+                            peers = b.getInt("peers", 0),
+                            seeds = b.getInt("seeds", 0),
+                            dhtNodes = b.getInt("dht", 0),
+                            state = b.getString("state", "")
+                        )
+                    }
+                    
+                    torrentsList.clear()
+                    torrentsList.addAll(newList)
+                }
             }
         }
     }
@@ -73,13 +87,9 @@ class MainActivity : ComponentActivity() {
                 ServerScreen(
                     onStartServer = { uri -> startService(uri) },
                     onStopServer = { stopService() },
-                    onStartTorrent = { magnet -> startTorrentDownload(magnet) },
                     onSelectTorrentFile = { uri -> startTorrentFileDownload(uri) },
-                    isDownloading = isDownloading,
-                    progress = torrentProgress,
-                    speed = torrentSpeed,
-                    peers = torrentPeers,
-                    downloadName = torrentName
+                    onRemoveTorrent = { id -> removeTorrent(id) },
+                    torrents = torrentsList
                 )
             }
         }
@@ -97,22 +107,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startTorrentDownload(magnet: String) {
-        isDownloading = true
-        torrentName = "Iniciando magnet..."
+    private fun startTorrentFileDownload(uri: Uri) {
         val intent = Intent(this, ServerService::class.java).apply {
-            action = "START_TORRENT"
-            putExtra("magnetUri", magnet)
+            action = "START_TORRENT_FILE"
+            putExtra("torrentUri", uri.toString())
         }
         startService(intent)
     }
 
-    private fun startTorrentFileDownload(uri: Uri) {
-        isDownloading = true
-        torrentName = "Cargando archivo..."
+    private fun removeTorrent(id: String) {
         val intent = Intent(this, ServerService::class.java).apply {
-            action = "START_TORRENT_FILE"
-            putExtra("torrentUri", uri.toString())
+            action = "REMOVE_TORRENT"
+            putExtra("torrentId", id)
         }
         startService(intent)
     }
@@ -134,19 +140,14 @@ class MainActivity : ComponentActivity() {
 fun ServerScreen(
     onStartServer: (Uri) -> Unit, 
     onStopServer: () -> Unit,
-    onStartTorrent: (String) -> Unit,
     onSelectTorrentFile: (Uri) -> Unit,
-    isDownloading: Boolean,
-    progress: Float,
-    speed: Long,
-    peers: Int,
-    downloadName: String
+    onRemoveTorrent: (String) -> Unit,
+    torrents: List<TorrentStats>
 ) {
     val context = LocalContext.current
     var selectedUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var isRunning by rememberSaveable { mutableStateOf(false) }
     var ipAddress by remember { mutableStateOf("No conectado") }
-    var magnetUri by remember { mutableStateOf("") }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -154,8 +155,8 @@ fun ServerScreen(
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }
@@ -187,7 +188,7 @@ fun ServerScreen(
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
             Image(
                 painter = painterResource(id = R.drawable.ic_logo),
@@ -198,7 +199,58 @@ fun ServerScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(text = "Switch HTTP Server + Torrent", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(text = "Gestor Torrent", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+
+            // LISTA DINÁMICA DE TORRENTS
+            torrents.forEach { stats ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = stats.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { onRemoveTorrent(stats.id) }) {
+                                Text("Quitar", color = Color.Red, fontSize = 12.sp)
+                            }
+                        }
+                        Text(
+                            text = "[${stats.state}] Compañeros: ${stats.peers} | Nodos: ${stats.dhtNodes}", 
+                            color = Color.Cyan, 
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { if (stats.progress < 0.1f) 0.05f else stats.progress / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color.Cyan,
+                            trackColor = Color.DarkGray,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(text = "${String.format("%.1f", stats.progress)}%", color = Color.Gray, fontSize = 11.sp)
+                            Text(text = "${stats.downloadSpeed / 1024} KB/s", color = Color.Gray, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = { torrentFileLauncher.launch("*/*") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+            ) {
+                Text("Descargar juego")
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+            HorizontalDivider(color = Color.Gray, thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(text = "Switch HTTP Server", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -238,76 +290,6 @@ fun ServerScreen(
                 )
             ) {
                 Text(text = if (isRunning) "2. Detener Servidor" else "2. Iniciar Servidor")
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-            HorizontalDivider(color = Color.Gray, thickness = 0.5.dp)
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(text = "Gestor Torrent", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-            if (isDownloading) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(text = downloadName, color = Color.White, fontWeight = FontWeight.Bold)
-                        Text(text = if (speed == 0L) "Buscando compañeros..." else "Conectado a $peers compañeros", color = Color.Cyan, fontSize = 12.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { if (progress < 0.1f) 0.05f else progress / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Color.Cyan,
-                            trackColor = Color.DarkGray,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(text = "${String.format("%.1f", progress)}%", color = Color.Gray, fontSize = 12.sp)
-                            Text(text = "${speed / 1024} KB/s", color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedButton(
-                onClick = { torrentFileLauncher.launch("*/*") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Cyan)
-            ) {
-                Text("Seleccionar archivo .torrent")
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedTextField(
-                value = magnetUri,
-                onValueChange = { magnetUri = it },
-                label = { Text("Pegar enlace Magnet", color = Color.Gray) },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color.Cyan,
-                    unfocusedBorderColor = Color.Gray
-                )
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    onStartTorrent(magnetUri)
-                    magnetUri = ""
-                },
-                enabled = magnetUri.startsWith("magnet:"),
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
-            ) {
-                Text("Descargar vía Magnet")
             }
         }
     }
