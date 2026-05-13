@@ -67,13 +67,14 @@ class TorrentManager(private val downloadDir: File) {
         Log.i(TAG, "Sesión Torrent lista. Directorio: ${downloadDir.absolutePath}")
     }
 
-    fun downloadTorrent(torrentInfo: TorrentInfo) {
-        if (!downloadDir.exists()) {
-            val created = downloadDir.mkdirs()
+    fun downloadTorrent(torrentInfo: TorrentInfo, customDir: File? = null) {
+        val targetDir = customDir ?: downloadDir
+        if (!targetDir.exists()) {
+            val created = targetDir.mkdirs()
             Log.d(TAG, "Creando carpeta de descarga: $created")
         }
 
-        Log.i(TAG, "Iniciando descarga de: ${torrentInfo.name()}")
+        Log.i(TAG, "Iniciando descarga de: ${torrentInfo.name()} en ${targetDir.absolutePath}")
         
         // Trackers públicos para asegurar conectividad
         val trackers = listOf(
@@ -87,7 +88,7 @@ class TorrentManager(private val downloadDir: File) {
         trackers.forEach { torrentInfo.addTracker(it) }
 
         try {
-            session.download(torrentInfo, downloadDir)
+            session.download(torrentInfo, targetDir)
             
             // Forzar despertar el motor para el torrent específico añadido
             val handle = session.find(torrentInfo.infoHash())

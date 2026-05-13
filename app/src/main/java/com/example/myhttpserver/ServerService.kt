@@ -49,14 +49,16 @@ class ServerService : Service() {
             "STOP" -> stopAll()
             "START_TORRENT_FILE" -> {
                 val uriString = intent.getStringExtra("torrentUri")
+                val dirUriString = intent.getStringExtra("directoryUri")
                 if (uriString != null) {
-                    ensureTorrentManager()
+                    ensureTorrentManager(dirUriString)
                     try {
                         val uri = Uri.parse(uriString)
                         val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         if (bytes != null) {
                             val torrentInfo = TorrentInfo.bdecode(bytes)
-                            torrentManager?.downloadTorrent(torrentInfo)
+                            val customDir = dirUriString?.let { getFileFromUri(Uri.parse(it)) }
+                            torrentManager?.downloadTorrent(torrentInfo, customDir)
                             
                             // Asegurar que solo hay un loop de progreso
                             handler.removeCallbacks(progressRunnable)
@@ -77,11 +79,39 @@ class ServerService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun ensureTorrentManager() {
+    private fun ensureTorrentManager(dirUriString: String? = null) {
         if (torrentManager == null) {
-            val downloadDir = getDownloadDirectory()
+            val downloadDir = if (dirUriString != null) {
+                getFileFromUri(Uri.parse(dirUriString)) ?: getDownloadDirectory()
+            } else {
+                getDownloadDirectory()
+            }
             torrentManager = TorrentManager(downloadDir)
         }
+    }
+
+    private fun getFileFromUri(uri: Uri): File? {
+        try {
+            if (uri.scheme == "file") return uri.path?.let { File(it) }
+            
+            val uriString = uri.toString()
+            if (uriString.contains("com.android.externalstorage.documents")) {
+                val parts = uriString.split("%3A")
+                if (parts.size > 1) {
+                    val docId = parts.last().replace("/", File.separator)
+                    val root = parts[parts.size - 2].substringAfterLast("/")
+                    
+                    return if (root == "primary") {
+                        File(android.os.Environment.getExternalStorageDirectory(), docId)
+                    } else {
+                        File("/storage/$root", docId)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ServerService", "Error parsing URI: $uri", e)
+        }
+        return null
     }
 
     private fun getDownloadDirectory(): File {
