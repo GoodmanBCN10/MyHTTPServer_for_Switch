@@ -19,6 +19,7 @@ Browse the files directly from DBI.
 No PC is required.
 
 📱 **Features**
+
 Simple and lightweight Android application.
 HTTP server running directly on your phone.
 Select any folder to share.
