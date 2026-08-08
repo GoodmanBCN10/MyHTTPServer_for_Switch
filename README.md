@@ -7,6 +7,7 @@ The app creates a simple HTTP server on your local network, allowing DBI on the 
 Join our community at https://t.me/+WWoAIRB3xjAwYTM0
 Support this project: https://www.paypal.com/paypalme/GoodmanBCN
 
+
 ✨ **How it works**
 
 Select the folder containing your files on your Android device.
@@ -19,6 +20,7 @@ Browse the files directly from DBI.
 
 No PC is required.
 
+
 📱 **Features**
 
 Simple and lightweight Android application.
@@ -29,12 +31,14 @@ Designed to work with DBI's HTTP browser.
 Useful for transferring files without using a computer.
 Works over your local Wi-Fi network.
 
+
 🎯 **Why?**
 
 Many Nintendo Switch users download files directly to their Android device, for example through torrent clients or Telegram.
 My HTTP Server for Switch provides a simple way to make those files available to the Nintendo Switch without first having to transfer them to a PC.
 
 **Phone → Wi-Fi → Switch → DBI**
+
 
 ⚠️ **Requirements**
 
@@ -43,13 +47,16 @@ Nintendo Switch running a compatible CFW setup
 DBI installed on the Nintendo Switch
 Android device and Nintendo Switch connected to the same local network.
 
+
 📥 **Download**
 
 Download the latest version from the Releases section of this repository.
 
+
 🤝 **Credits**
 
 Special thanks to DBI and its developers for providing the HTTP file browser functionality that makes this application possible.
+
 
 ⚖️ **Disclaimer**
 
