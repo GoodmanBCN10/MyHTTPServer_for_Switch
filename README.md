@@ -4,7 +4,9 @@
 
 My HTTP Server for Switch is an Android application designed for Nintendo Switch users who keep their files on their mobile device.
 The app creates a simple HTTP server on your local network, allowing DBI on the Nintendo Switch to access the files directly from your Android device.
+
 Join our community at https://t.me/+WWoAIRB3xjAwYTM0
+
 Support this project: https://www.paypal.com/paypalme/GoodmanBCN
 
 
