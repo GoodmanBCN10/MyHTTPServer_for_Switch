@@ -29,24 +29,29 @@ Useful for transferring files without using a computer.
 Works over your local Wi-Fi network.
 
 🎯 **Why?**
+
 Many Nintendo Switch users download files directly to their Android device, for example through torrent clients or Telegram.
 My HTTP Server for Switch provides a simple way to make those files available to the Nintendo Switch without first having to transfer them to a PC.
 
 **Phone → Wi-Fi → Switch → DBI**
 
 ⚠️ **Requirements**
+
 Android device
 Nintendo Switch running a compatible CFW setup
 DBI installed on the Nintendo Switch
 Android device and Nintendo Switch connected to the same local network.
 
 📥 **Download**
+
 Download the latest version from the Releases section of this repository.
 
 🤝 **Credits**
+
 Special thanks to DBI and its developers for providing the HTTP file browser functionality that makes this application possible.
 
 ⚖️ **Disclaimer**
+
 My HTTP Server for Switch is an independent community project and is not affiliated with or endorsed by Nintendo.
 This application is a file-transfer tool. It does not provide, host or distribute copyrighted content.
 
