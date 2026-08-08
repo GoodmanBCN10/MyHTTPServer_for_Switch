@@ -8,6 +8,7 @@ Join our community at https://t.me/+WWoAIRB3xjAwYTM0
 Support this project: https://www.paypal.com/paypalme/GoodmanBCN
 
 ✨ **How it works**
+
 Select the folder containing your files on your Android device.
 Start the HTTP server.
 The app displays the IP address and port of the server.
